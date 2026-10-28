@@ -1,0 +1,607 @@
+{
+  "name": "Günlük Meta Reklam Raporu (Telegram, Gemini)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 8-23 * * *"
+            }
+          ]
+        }
+      },
+      "id": "f79eb86d-0b97-473d-a9ff-e91a133f6846",
+      "name": "5 Dakikada Bir (08-24)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1808,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Saat 08:00'den önceyse ya da bugünün raporu zaten gittiyse dur\nconst s = $getWorkflowStaticData('global');\nconst now = $now.setZone('Europe/Istanbul');\nconst today = now.toFormat('yyyy-MM-dd');\nif (now.hour < 8 || s.lastSentDate === today) return [];\nreturn [{ json: { today } }];\n"
+      },
+      "id": "534b140c-22ce-4800-b2c2-a3013d6acd9f",
+      "name": "Bugün Gönderildi mi?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1600,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "92d591ac-6389-48db-982a-5ec85fe249d9",
+              "name": "businessName",
+              "value": "İşletmenin adı",
+              "type": "string"
+            },
+            {
+              "id": "f5c5ee75-17fb-4c38-9162-e43870d12bf6",
+              "name": "businessDescription",
+              "value": "İşletmenin kısa tanımı, örn. İstanbul'da bir kafe",
+              "type": "string"
+            },
+            {
+              "id": "eacc5cf3-db8b-480c-a0c4-bbc3e64cef7b",
+              "name": "adAccountId",
+              "value": "act_XXXXXXXXXXXXXXX",
+              "type": "string"
+            },
+            {
+              "id": "6b6a8236-8c27-43bd-a142-2bb59b4f5c8a",
+              "name": "graphVersion",
+              "value": "v26.0",
+              "type": "string"
+            },
+            {
+              "id": "5a883035-8c14-4e74-8d23-f2ba245450a9",
+              "name": "telegramChatId",
+              "value": "TELEGRAM_CHAT_ID",
+              "type": "string"
+            },
+            {
+              "id": "8c446f40-6d74-45aa-857d-a1d7a214414a",
+              "name": "aiModel",
+              "value": "gemini-3.5-flash",
+              "type": "string"
+            },
+            {
+              "id": "177be213-4693-417a-b412-cbf1fa13d442",
+              "name": "frequencyWindow",
+              "value": "last_30d",
+              "type": "string"
+            },
+            {
+              "id": "2bb0daa0-9a37-476d-ab56-1439dba71fc2",
+              "name": "frequencyLimit",
+              "value": 3,
+              "type": "number"
+            },
+            {
+              "id": "91040cc5-c0d0-4f1e-befc-f42ad8e7e4b4",
+              "name": "costIncreasePct",
+              "value": 40,
+              "type": "number"
+            },
+            {
+              "id": "a6f162e1-c363-4dcd-8015-5ce5dd4a0076",
+              "name": "minSpend",
+              "value": 20,
+              "type": "number"
+            },
+            {
+              "id": "f023fc08-0219-4cf3-8354-a2ee0a0558d0",
+              "name": "minBaseConversations",
+              "value": 5,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "877242c7-fa0c-415b-933f-7d21e78abc40",
+      "name": "Ayarlar",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1376,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://graph.facebook.com/' + $('Ayarlar').first().json.graphVersion + '/' + $('Ayarlar').first().json.adAccountId + '/insights' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "level",
+              "value": "account"
+            },
+            {
+              "name": "date_preset",
+              "value": "last_7d"
+            },
+            {
+              "name": "time_increment",
+              "value": "1"
+            },
+            {
+              "name": "fields",
+              "value": "date_start,account_currency,spend,reach,impressions,frequency,cpm,actions"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "469c3b4c-1bd4-433d-be8b-473e8f505e59",
+      "name": "Meta - Hesap (7 gün)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1152,
+        32
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpQueryAuth": {
+          "name": "Meta Ads Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Dünün Meta reklam özetini ve reklam seti uyarılarını hazırlar\nconst TZ = 'Europe/Istanbul';\nconst MSG_STARTED = 'onsite_conversion.messaging_conversation_started_7d'; // mesaj başlatan sohbetler\nconst MSG_NEW = 'onsite_conversion.messaging_first_reply';                // ilk kez yazan kişiler\n\n// Eşikler Ayarlar node'undan geliyor\nconst cfg = $('Ayarlar').first().json;\nconst FREQ_LIMIT = Number(cfg.frequencyLimit);          // sıklık bunu geçerse set izlemeye alınır\nconst COST_UP = Number(cfg.costIncreasePct);            // mesaj başı maliyet kendi ortalamasını bu yüzde kadar aşarsa uyarı\nconst MIN_SPEND = Number(cfg.minSpend);                 // dün bundan az harcayan sete maliyet uyarısı verilmez\nconst MIN_BASE_CONV = Number(cfg.minBaseConversations); // önceki günlerde bundan az mesaj varsa ortalama güvenilmez\nconst FREQ_LABEL = { last_7d: '7 gün', last_14d: '14 gün', last_30d: '30 gün', last_90d: '90 gün', maximum: 'tüm zamanlar' }[cfg.frequencyWindow] || cfg.frequencyWindow;\nconst MAX_SET_LINES = 15;\n\nconst accountRows = $('Meta - Hesap (7 gün)').first().json.data || [];\nconst adsetRows = $('Meta - Reklam Setleri (7 gün)').first().json.data || [];\nconst freqRows = $('Meta - Reklam Setleri (sıklık)').first().json.data || [];\n\nconst yesterday = $now.setZone(TZ).minus({ days: 1 });\nconst yStr = yesterday.toFormat('yyyy-MM-dd');\nconst dateLabel = yesterday.setLocale('tr').toFormat('d MMMM yyyy, cccc');\n\nconst num = v => Number(v || 0);\nconst act = (row, type) => {\n  const a = (row.actions || []).find(x => x.action_type === type);\n  return a ? Number(a.value) : 0;\n};\nconst summarize = row => {\n  const spend = num(row.spend);\n  const conversations = act(row, MSG_STARTED);\n  return {\n    spend,\n    reach: num(row.reach),\n    impressions: num(row.impressions),\n    frequency: num(row.frequency),\n    cpm: num(row.cpm),\n    conversations,\n    newContacts: act(row, MSG_NEW),\n    costPerConversation: conversations > 0 ? spend / conversations : null,\n  };\n};\n\nconst currency = (accountRows[0] && accountRows[0].account_currency) || 'TRY';\nconst money = v => v == null ? '–' : new Intl.NumberFormat('tr-TR', { style: 'currency', currency, maximumFractionDigits: 2 }).format(v);\nconst int = v => new Intl.NumberFormat('tr-TR').format(Math.round(v));\nconst dec = v => new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 2 }).format(v);\nconst esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst header = `📊 <b>${esc(cfg.businessName)} – Meta Reklam Raporu</b>\\n📅 ${dateLabel}`;\n\nconst yRow = accountRows.find(r => r.date_start === yStr);\nif (!yRow) {\n  return [{ json: { hasData: false, text: `${header}\\n\\n⚠️ Dün hiç reklam harcaması görünmüyor. Reklamlar bilerek durdurulmadıysa ödeme yöntemi ve hesap durumu kontrol edilmeli.`, stats: null } }];\n}\n\nconst y = summarize(yRow);\nconst prev = accountRows.filter(r => r.date_start !== yStr).map(summarize);\nconst prevSpend = prev.reduce((s, r) => s + r.spend, 0);\nconst prevConv = prev.reduce((s, r) => s + r.conversations, 0);\nconst base = prev.length ? {\n  days: prev.length,\n  spend: prevSpend / prev.length,\n  conversations: prevConv / prev.length,\n  reach: prev.reduce((s, r) => s + r.reach, 0) / prev.length,\n  costPerConversation: prevConv > 0 ? prevSpend / prevConv : null,\n} : null;\n\n// Önceki günlerin ortalamasına göre değişim (maliyette düşüş = iyi)\nconst trend = (cur, ref, lowerIsBetter = false) => {\n  if (cur == null || ref == null || ref === 0) return '';\n  const pct = ((cur - ref) / ref) * 100;\n  if (Math.abs(pct) < 5) return ' ➖';\n  const good = lowerIsBetter ? pct < 0 : pct > 0;\n  return ` ${good ? '🟢' : '🔴'} ${pct > 0 ? '▲' : '▼'}%${Math.abs(Math.round(pct))}`;\n};\n\n// --- Reklam setleri: her set dünü kendi önceki günleriyle karşılaştırılır ---\nconst freqById = {};\nfor (const r of freqRows) freqById[r.adset_id] = num(r.frequency);\n\nconst groups = {};\nfor (const r of adsetRows) {\n  if (!groups[r.adset_id]) groups[r.adset_id] = { id: r.adset_id, name: r.adset_name, campaign: r.campaign_name, rows: [] };\n  groups[r.adset_id].rows.push(r);\n}\nconst multiCampaign = new Set(Object.values(groups).map(g => g.campaign)).size > 1;\n\nconst sets = [];\nfor (const g of Object.values(groups)) {\n  const yr = g.rows.find(r => r.date_start === yStr);\n  if (!yr) continue;\n  const d = summarize(yr);\n  if (d.spend <= 0) continue;\n\n  const p = g.rows.filter(r => r.date_start !== yStr).map(summarize);\n  const pSpend = p.reduce((s, r) => s + r.spend, 0);\n  const pConv = p.reduce((s, r) => s + r.conversations, 0);\n  const baseCpc = pConv > 0 ? pSpend / pConv : null;\n  const costPct = d.costPerConversation != null && baseCpc ? ((d.costPerConversation - baseCpc) / baseCpc) * 100 : null;\n  const comparable = baseCpc != null && pConv >= MIN_BASE_CONV && d.spend >= MIN_SPEND;\n  const freq = freqById[g.id] != null ? freqById[g.id] : null;\n\n  const alerts = [];\n  const notes = [];\n  if (d.conversations === 0 && d.spend >= MIN_SPEND && (baseCpc == null || d.spend >= 2 * baseCpc)) {\n    alerts.push(baseCpc\n      ? `hiç mesaj gelmedi; bu harcama normalde ~${int(d.spend / baseCpc)} mesaj getiriyordu`\n      : 'harcama var ama hiç mesaj gelmedi');\n  } else if (comparable && costPct != null && costPct >= COST_UP) {\n    alerts.push(`kendi ortalaması ${money(baseCpc)}, dün %${Math.round(costPct)} daha pahalı`);\n  }\n  if (freq != null && freq > FREQ_LIMIT) {\n    // Sıklık tek başına karar değil: maliyet de bozuluyorsa uyarı, sonuç geliyorsa izleme\n    if (alerts.length) alerts.push(`sıklık da yüksek: ${dec(freq)} (${FREQ_LABEL})`);\n    else if (comparable && costPct != null && costPct >= COST_UP / 2) alerts.push(`sıklık ${dec(freq)} (${FREQ_LABEL}) ve mesaj başı maliyet %${Math.round(costPct)} arttı`);\n    else notes.push(`sıklık ${dec(freq)} (${FREQ_LABEL}), maliyet şimdilik normal`);\n  }\n\n  sets.push({\n    name: multiCampaign ? `${g.campaign} › ${g.name}` : g.name,\n    status: alerts.length ? 'uyari' : notes.length ? 'izlemede' : 'normal',\n    yesterday: d,\n    ownAverage: { days: p.length, costPerConversation: baseCpc, conversations: pConv },\n    frequency: freq,\n    alerts,\n    notes,\n  });\n}\nconst rank = { uyari: 0, izlemede: 1, normal: 2 };\nsets.sort((a, b) => rank[a.status] - rank[b.status] || b.yesterday.spend - a.yesterday.spend);\nconst alertCount = sets.filter(s => s.status === 'uyari').length;\n\nconst lines = [\n  header,\n  alertCount\n    ? `⚠️ <b>${alertCount} reklam setinde dikkat gereken durum var</b>`\n    : '✅ Reklam setlerinde dikkat gereken bir durum yok',\n  '',\n  `💬 Mesaj başlatan: <b>${int(y.conversations)}</b> (ilk kez yazan: ${int(y.newContacts)})${trend(y.conversations, base?.conversations)}`,\n  `💰 Mesaj başı maliyet: <b>${money(y.costPerConversation)}</b>${trend(y.costPerConversation, base?.costPerConversation, true)}`,\n  `👥 Tekil erişim: <b>${int(y.reach)}</b>${trend(y.reach, base?.reach)}`,\n  `👁 Gösterim: ${int(y.impressions)} · Sıklık: ${dec(y.frequency)}`,\n  `💸 Harcama: <b>${money(y.spend)}</b> · CPM: ${money(y.cpm)}`,\n];\nif (sets.length) {\n  lines.push('', '<b>Reklam setleri</b>');\n  for (const s of sets.slice(0, MAX_SET_LINES)) {\n    const d = s.yesterday;\n    const figures = d.conversations > 0\n      ? `${int(d.conversations)} mesaj · ${money(d.costPerConversation)}/mesaj · ${money(d.spend)}`\n      : `0 mesaj · ${money(d.spend)}`;\n    const icon = s.status === 'uyari' ? '⚠️' : s.status === 'izlemede' ? '👀' : '•';\n    const name = s.status === 'uyari' ? `<b>${esc(s.name)}</b>` : esc(s.name);\n    lines.push(`${icon} ${name}: ${figures}`);\n    for (const t of [...s.alerts, ...s.notes]) lines.push(`   ↳ ${esc(t)}`);\n  }\n  if (sets.length > MAX_SET_LINES) lines.push(`… ve ${sets.length - MAX_SET_LINES} set daha`);\n}\nif (base) lines.push('', `<i>Oklar: önceki ${base.days} günün ortalamasına göre. Her set kendi önceki günleriyle karşılaştırılır.</i>`);\n\nreturn [{ json: {\n  hasData: true,\n  text: lines.join('\\n'),\n  stats: {\n    tarih: yStr,\n    para_birimi: currency,\n    dun: y,\n    onceki_gunler_ortalama: base,\n    reklam_setleri: sets,\n    esikler: { siklik: FREQ_LIMIT, siklik_donemi: FREQ_LABEL, maliyet_artis_yuzde: COST_UP, min_harcama: MIN_SPEND },\n  },\n} }];\n"
+      },
+      "id": "b9d6d6bf-2ecd-459d-a55d-3d933d92d2dd",
+      "name": "Raporu Hazırla",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -496,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "2637ecc8-8c76-401d-9d15-491de4e494c9",
+              "leftValue": "={{ $json.hasData }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1d448ed-cb4f-407d-8d81-4971741fe80a",
+      "name": "Veri var mı?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -272,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://generativelanguage.googleapis.com/v1beta/models/' + $('Ayarlar').first().json.aiModel + ':generateContent' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ systemInstruction: { parts: [{ text: \"Sen \" + $('Ayarlar').first().json.businessName + \" (\" + $('Ayarlar').first().json.businessDescription + \") için Meta mesaj reklamlarını analiz eden bir uzmansın. Sana dünün hesap verileri, önceki günlerin ortalaması ve reklam seti bazında analiz JSON olarak verilecek. Her setin status alanı uyari, izlemede ya da normal; alerts ve notes alanları kurallarla bulunan durumları anlatır. Her set kendi önceki günleriyle karşılaştırılır. Türkçe, en fazla 3 kısa cümleyle yorum yap. Uyarılı set varsa en önemlisine odaklan ve bugün o set için denenebilecek tek bir somut aksiyon söyle; uyarı yoksa genel gidişatı kısaca değerlendir. Sıklığı yüksek ama maliyeti normal olan sete dokunulmasını önerme. Rakamları tekrar listeleme; markdown, madde işareti veya emoji kullanma, sadece düz metin yaz.\" }] }, contents: [{ role: \"user\", parts: [{ text: \"Dünün reklam verileri (JSON):\\n\" + JSON.stringify($json.stats) }] }], generationConfig: { temperature: 0.4, maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: \"low\" } } }) }}",
+        "options": {}
+      },
+      "id": "9391e1f2-b45b-4e47-9ddd-dfc476c8d8a8",
+      "name": "Gemini - Yorum",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -48,
+        -80
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Gemini API Key"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Gemini yorumunu rapora ekler; Gemini hata verirse rapor yorumsuz gider\nconst report = $('Raporu Hazırla').first().json.text;\nconst resp = $input.first().json || {};\nconst parts = (resp.candidates && resp.candidates[0] && resp.candidates[0].content && resp.candidates[0].content.parts) || [];\nconst comment = parts.filter(p => p.text && !p.thought).map(p => p.text).join('\\n').trim();\nconst esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst text = comment ? `${report}\\n\\n🤖 <b>Yapay zekâ yorumu</b>\\n${esc(comment)}` : report;\nreturn [{ json: { text } }];\n"
+      },
+      "id": "59f6e343-ec4d-40e9-bd11-6c27b21e8f34",
+      "name": "Mesajı Birleştir",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Ayarlar').first().json.telegramChatId }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "549a4faa-c07e-4c67-b02b-0720b5fc388d",
+      "name": "Telegram'a Gönder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        400,
+        32
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Rapor gönderildi: bugün tekrar gönderme\nconst s = $getWorkflowStaticData('global');\ns.lastSentDate = $now.setZone('Europe/Istanbul').toFormat('yyyy-MM-dd');\nreturn $input.all();\n"
+      },
+      "id": "c542dc06-dcd2-424a-8b61-3df0fe04dfba",
+      "name": "Gönderildi Olarak İşaretle",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://graph.facebook.com/' + $('Ayarlar').first().json.graphVersion + '/' + $('Ayarlar').first().json.adAccountId + '/insights' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "level",
+              "value": "adset"
+            },
+            {
+              "name": "date_preset",
+              "value": "last_7d"
+            },
+            {
+              "name": "time_increment",
+              "value": "1"
+            },
+            {
+              "name": "fields",
+              "value": "campaign_name,adset_id,adset_name,date_start,spend,reach,impressions,frequency,actions"
+            },
+            {
+              "name": "limit",
+              "value": "500"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "26410f2c-e6cc-4b37-8ba0-85cf8bd89ca8",
+      "name": "Meta - Reklam Setleri (7 gün)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -928,
+        32
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpQueryAuth": {
+          "name": "Meta Ads Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://graph.facebook.com/' + $('Ayarlar').first().json.graphVersion + '/' + $('Ayarlar').first().json.adAccountId + '/insights' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "level",
+              "value": "adset"
+            },
+            {
+              "name": "date_preset",
+              "value": "={{ $('Ayarlar').first().json.frequencyWindow }}"
+            },
+            {
+              "name": "fields",
+              "value": "adset_id,adset_name,frequency"
+            },
+            {
+              "name": "limit",
+              "value": "200"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f60e2c4d-9a32-4dbd-a28d-b31a2d7e66a6",
+      "name": "Meta - Reklam Setleri (sıklık)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -704,
+        32
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpQueryAuth": {
+          "name": "Meta Ads Token"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "1b317552-d908-47d2-9c18-995ff39982e3",
+      "name": "Hata Olursa",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1808,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow hata verirse Telegram'a haber verir. Akış her 5 dakikada bir tekrar\n// denediği için uyarı günde en fazla bir kez gider.\nconst s = $getWorkflowStaticData('global');\nconst today = $now.setZone('Europe/Istanbul').toFormat('yyyy-MM-dd');\nif (s.lastErrorAlertDate === today) return [];\ns.lastErrorAlertDate = today;\n\nconst d = $input.first().json || {};\nconst ex = d.execution || {};\nconst trig = (d.trigger && d.trigger.error) || {};\nconst node = ex.lastNodeExecuted || (trig.node && trig.node.name) || 'bilinmiyor';\nconst raw = (ex.error && (ex.error.description || ex.error.message)) || trig.message || 'Hata mesajı yok';\nconst message = String(raw).replace(/access_token=[^&\\s\"']+/gi, 'access_token=***').slice(0, 500);\nconst esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nconst lines = [\n  '⚠️ <b>Meta reklam raporu alınamadı</b>',\n  `Adım: ${esc(node)}`,\n  `Hata: ${esc(message)}`,\n];\nif (/access token|session has expired|OAuthException|\"code\":\\s*190/i.test(raw)) {\n  lines.push('', \"Meta token'ının süresi dolmuş görünüyor. n8n'de \\\"Meta Ads Token\\\" kimlik bilgisini yenilemek gerekiyor.\");\n}\nlines.push('', 'Akış her 5 dakikada bir tekrar deniyor; düzelirse rapor kendiliğinden gelir. Bugün başka hata uyarısı gönderilmeyecek.');\nif (ex.url) lines.push(`<a href=\"${esc(ex.url)}\">Çalıştırmayı aç</a>`);\n\nreturn [{ json: { text: lines.join('\\n') } }];\n"
+      },
+      "id": "9037dd5e-a777-4846-bb2e-45be143d2ee0",
+      "name": "Hata Uyarısı (günde 1)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1600,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "TELEGRAM_CHAT_ID",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "41cbe199-d88b-41ed-a9bf-b525c3940eda",
+      "name": "Hata Uyarısını Telegram'a Gönder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -1376,
+        336
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Kurulum\n**Ayarlar** node'unda: businessName, businessDescription, adAccountId (act_ ile), telegramChatId.\n\n**Hata Uyarısını Telegram'a Gönder** node'unda chat ID'yi ayrıca girin; hata akışı Ayarlar'ı okuyamıyor.\n\nKimlik bilgileri: Meta Ads Token (Query Auth, ad: access_token), Gemini API Key (Header Auth, ad: x-goog-api-key), Telegram.\n\n## Uyarı eşikleri (Ayarlar)\n**costIncreasePct 40:** mesaj başı maliyet setin kendi önceki 6 gününün ortalamasını %40 aşarsa uyarı.\n\n**frequencyLimit 3:** sıklık bunu geçerse set izlemeye alınır; maliyet de bu eşiğin yarısı kadar artmışsa uyarıya döner.\n\n**minSpend 20:** dün bundan az harcayan sete maliyet uyarısı verilmez.\n\n**minBaseConversations 5:** önceki günlerde bundan az mesajı olan setin ortalaması güvenilmez sayılır.\n\n**frequencyWindow last_30d:** sıklık son 30 güne göre hesaplanır.",
+        "height": 560,
+        "width": 420
+      },
+      "id": "988db27b-d355-4b1b-8602-ef272b1a000f",
+      "name": "Not: Eşikler",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1600,
+        -400
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "5 Dakikada Bir (08-24)": {
+      "main": [
+        [
+          {
+            "node": "Bugün Gönderildi mi?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bugün Gönderildi mi?": {
+      "main": [
+        [
+          {
+            "node": "Ayarlar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ayarlar": {
+      "main": [
+        [
+          {
+            "node": "Meta - Hesap (7 gün)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta - Hesap (7 gün)": {
+      "main": [
+        [
+          {
+            "node": "Meta - Reklam Setleri (7 gün)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Raporu Hazırla": {
+      "main": [
+        [
+          {
+            "node": "Veri var mı?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Veri var mı?": {
+      "main": [
+        [
+          {
+            "node": "Gemini - Yorum",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram'a Gönder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Yorum": {
+      "main": [
+        [
+          {
+            "node": "Mesajı Birleştir",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mesajı Birleştir": {
+      "main": [
+        [
+          {
+            "node": "Telegram'a Gönder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram'a Gönder": {
+      "main": [
+        [
+          {
+            "node": "Gönderildi Olarak İşaretle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta - Reklam Setleri (7 gün)": {
+      "main": [
+        [
+          {
+            "node": "Meta - Reklam Setleri (sıklık)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta - Reklam Setleri (sıklık)": {
+      "main": [
+        [
+          {
+            "node": "Raporu Hazırla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hata Olursa": {
+      "main": [
+        [
+          {
+            "node": "Hata Uyarısı (günde 1)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hata Uyarısı (günde 1)": {
+      "main": [
+        [
+          {
+            "node": "Hata Uyarısını Telegram'a Gönder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timezone": "Europe/Istanbul"
+  },
+  "tags": []
+}
